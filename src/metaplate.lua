@@ -24,50 +24,89 @@ SOFTWARE.
 
 local M = {}
 
+-- Iterator: split string.
+local function split(str, sep)
+  local cur, done = 1, false
+  return function(s, v)
+    local a, b = str:find(sep, cur, true)
+    if a then
+      local pcur = cur
+      cur = b+1
+      return str:sub(pcur, a-1)
+    elseif not done then
+      done = true
+      return str:sub(cur, #str), true
+    end
+  end
+end
+
 local default_config = {
-  range_pattern = "%{(%=*)%!(.-)%!%1%}",
-  line_pattern = "\n%s%!(.-)\n",
-  expression_pattern = "%$([%w_]+)"
+  line_pattern = "^[\t ]*%!(.*)$", -- !...
+  inlines = {
+    { -- range statement: {! ... !}
+      pattern = "%{%!(.-)%!%}",
+      produce = function(source) return source end
+    },
+    { -- identifier expression: $...
+      pattern = "%$([%w_]+)",
+      produce = function(source) return " Z("..source..") " end
+    }
+  }
 }
 
--- Transform source string to production code.
-local function to_production(str)
-  return "Z[["..str.."]]"
+-- Find suitable level to embed in a long bracket literal.
+local function find_suitable_level(source)
+  local level = 0
+  while source:find("]"..("="):rep(level).."]", 1, true) do
+    level = level+1
+  end
+  return level
 end
 
-local function parse_expressions(out, source, config)
-      table.insert(out, to_production(source:sub(cur, a+1))) -- source language
+-- Produce meta code for verbatim source.
+local function produce_verbatim(source)
+  if #source > 0 then
+    local equals = ("="):rep(find_suitable_level(source))
+    if source:match("^\r?\n") then return " Z'\\n'Z["..equals.."["..source.."]"..equals.."] "
+    else return " Z["..equals.."["..source.."]"..equals.."] " end
+  else return "" end
 end
 
-local function parse_lines(out, source, config)
+local function parse_inline(out, source, config, index)
+  local inline = config.inlines[index]
+  if not inline then table.insert(out, produce_verbatim(source)); return end
+  -- match pattern
   local cur = 1
-  local a, b, lua = source:find(config.line_pattern)
+  local a, b, match = source:find(inline.pattern)
   while a do
-    parse_expressions(out, source:sub(cur, a+1), config) -- sub
-    table.insert(out, lua) -- meta language
+    parse_inline(out, source:sub(cur, a-1), config, index+1)
+    table.insert(out, inline.produce(match))
     -- next
     cur = b+1
-    a, b, lua = source:find(config.range_pattern, cur)
+    a, b, match = source:find(inline.pattern, cur)
   end
-  parse_expressions(out, source:sub(cur), config) -- sub
+  parse_inline(out, source:sub(cur), config, index+1) -- end
 end
 
-local function parse_ranges(out, source, config)
-  local cur = 1
-  local a, b, levels, lua = source:find(config.range_pattern)
-  while a do
-    parse_lines(out, source:sub(cur, a+1), config) -- sub
-    table.insert(out, lua) -- meta language
-    -- next
-    cur = b+1
-    a, b, levels, lua = source:find(config.range_pattern, cur)
-  end
-  parse_lines(out, source:sub(cur), config) -- sub
+local function parse_line(out, line, config)
+  local match = line:match(config.line_pattern)
+  if match then table.insert(out, match)
+  else parse_inline(out, line, config, 1) end
 end
 
-function M.compile(template, chunkname, env, config)
+local function parse(out, source, config)
+  for line, last in split(source, "\n") do
+    parse_line(out, last and line or line.."\n", config)
+  end
+end
+
+function M.compile(template, config)
   config = config or default_config
-  return assert(load(source, chunkname, "t", env))
+  local segments = {}
+  parse(segments, template, config)
+  return table.concat(segments)
 end
+
+M.default_config = default_config
 
 return M

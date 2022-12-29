@@ -1,0 +1,22 @@
+= metaplate
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+:toc: left
+:toclevels: 5
+
+*metaplate* is a simple Lua meta-programming / template processing module.
+
+.Use cases:
+- Meta-programming, e.g. by pre-processing an existing programming language to generate code.
+- Content templates, e.g. for HTML, markdown or other document languages.
+
+== Concept
+
+What the module implements is very common. We could say that it is about having the ability to generate code for a _source language_ using a _meta language_, by embedding the _meta language_ into the _source language_, instead of directly producing the _source language_ from the _meta language_.
+
+The module provides a way to compile a template using Lua as the _meta language_ for any _source language_. The result of this compilation is _meta language_ code, here Lua, which can be loaded and executed to produce the final _source language_'s output.
