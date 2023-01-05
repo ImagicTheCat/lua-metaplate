@@ -40,16 +40,27 @@ local function split(str, sep)
   end
 end
 
+-- production functions
+local p_identity = function(source) return source end
+local p_expression = function(source) return " Z("..source..") " end
+
 local default_config = {
-  line_pattern = "^[\t ]*%!(.*)$", -- !...
-  inlines = {
+  parsing_steps = {
+    { -- line statement
+      pattern = "^[\t ]*%!(.*)$", -- !...
+      produce = p_identity
+    },
     { -- range statement: {! ... !}
       pattern = "%{%!(.-)%!%}",
-      produce = function(source) return source end
+      produce = p_identity
+    },
+    { -- range expression: {$ ... $}
+      pattern = "%{%$(.-)%$%}",
+      produce = p_expression
     },
     { -- identifier expression: $...
       pattern = "%$([%w_]+)",
-      produce = function(source) return " Z("..source..") " end
+      produce = p_expression
     }
   }
 }
@@ -72,34 +83,39 @@ local function produce_verbatim(source)
   else return "" end
 end
 
-local function parse_inline(out, source, config, index)
-  local inline = config.inlines[index]
+local function parse_step(out, source, config, index)
+  local inline = config.parsing_steps[index]
   if not inline then table.insert(out, produce_verbatim(source)); return end
   -- match pattern
   local cur = 1
   local a, b, match = source:find(inline.pattern)
   while a do
-    parse_inline(out, source:sub(cur, a-1), config, index+1)
+    parse_step(out, source:sub(cur, a-1), config, index+1)
     table.insert(out, inline.produce(match))
     -- next
     cur = b+1
     a, b, match = source:find(inline.pattern, cur)
   end
-  parse_inline(out, source:sub(cur), config, index+1) -- end
-end
-
-local function parse_line(out, line, config)
-  local match = line:match(config.line_pattern)
-  if match then table.insert(out, match)
-  else parse_inline(out, line, config, 1) end
+  parse_step(out, source:sub(cur), config, index+1) -- end
 end
 
 local function parse(out, source, config)
   for line, last in split(source, "\n") do
-    parse_line(out, last and line or line.."\n", config)
+    parse_step(out, last and line or line.."\n", config, 1)
   end
 end
 
+-- Compile template to Lua (meta) code.
+-- For each line of the template, each parsing step decomposes the line recursively;
+-- unmatched strings are processed in the next step until it generates verbatim meta code.
+-- Note: the first step can use pattern anchors as line anchors.
+--
+-- template: string
+-- config: (optional) table
+--- parsing_steps: list of parsing steps {.pattern, .produce}
+---- pattern: Lua pattern
+---- produce(capture): function which should return produced meta code (string) from the capture
+-- return string
 function M.compile(template, config)
   config = config or default_config
   local segments = {}

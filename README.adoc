@@ -12,11 +12,168 @@ endif::[]
 *metaplate* is a simple Lua meta-programming / template processing module.
 
 .Use cases:
-- Meta-programming, e.g. by pre-processing an existing programming language to generate code.
 - Content templates, e.g. for HTML, markdown or other document languages.
+- Meta-programming, e.g. as pre-processing for an existing programming language.
 
 == Concept
 
 What the module implements is very common. We could say that it is about having the ability to generate code for a _source language_ using a _meta language_, by embedding the _meta language_ into the _source language_, instead of directly producing the _source language_ from the _meta language_.
 
 The module provides a way to compile a template using Lua as the _meta language_ for any _source language_. The result of this compilation is _meta language_ code, here Lua, which can be loaded and executed to produce the final _source language_'s output.
+
+NOTE: The generated meta code, for the default config, preserves the multiline structure of the template; the line number of a Lua error will match with the template.
+
+== API
+
+[source, lua]
+----
+-- Compile template to Lua (meta) code.
+-- For each line of the template, each parsing step decomposes the line recursively;
+-- unmatched strings are processed in the next step until it generates verbatim meta code.
+-- Note: the first step can use pattern anchors as line anchors.
+--
+-- template: string
+-- config: (optional) table
+--- parsing_steps: list of parsing steps {.pattern, .produce}
+---- pattern: Lua pattern
+---- produce(capture): function which should return produced meta code (string) from the capture
+-- return string
+metaplate.compile(template, config)
+
+-- The default config.
+metaplate.default_config
+----
+
+The generated meta code calls a production function `Z` with the value to output. The function is provided by the application, e.g. as a local or global.
+
+=== Default config
+
+The default `config` is as follow:
+
+[source, lua]
+----
+local p_identity = function(source) return source end
+local p_expression = function(source) return " Z("..source..") " end
+
+local default_config = {
+  parsing_steps = {
+    { -- line statement
+      pattern = "^[\t ]*%!(.*)$", -- !...
+      produce = p_identity
+    },
+    { -- range statement: {! ... !}
+      pattern = "%{%!(.-)%!%}",
+      produce = p_identity
+    },
+    { -- range expression: {$ ... $}
+      pattern = "%{%$(.-)%$%}",
+      produce = p_expression
+    },
+    { -- identifier expression: $...
+      pattern = "%$([%w_]+)",
+      produce = p_expression
+    }
+  }
+}
+----
+
+=== Examples
+
+.HTML multiplication table
+====
+
+.Template
+[source, html]
+----
+<h1>Multiplication table</h1>
+<table>
+! for y=0,10 do
+  <tr>
+    <td><strong>{$ y == 0 and 'X' or y $}</strong></td>
+!   for x=1,10 do
+!     if y == 0 then
+    <td><strong>$x</strong></td>
+!     else
+    <td>{$ x*y $}</td>
+!     end
+!   end
+  </tr>
+! end
+</table>
+----
+
+.Meta code
+[source, lua]
+----
+ Z[[<h1>Multiplication table</h1>
+]]  Z[[<table>
+]]  for y=0,10 do
+ Z[[  <tr>
+]]  Z[[    <td><strong>]]  Z( y == 0 and 'X' or y )  Z[[</strong></td>
+]]    for x=1,10 do
+     if y == 0 then
+ Z[[    <td><strong>]]  Z(x)  Z[[</strong></td>
+]]      else
+ Z[[    <td>]]  Z( x*y )  Z[[</td>
+]]      end
+   end
+ Z[[  </tr>
+]]  end
+ Z[[</table>
+]]
+----
+
+====
+
+.Generic vector
+====
+
+.Template
+[source, lua]
+----
+! local function vec(n)
+-- generated add
+function vec{$ n $}_t.add(r,a,b)
+!   for i=1,n do
+  r[$i] = a[$i] + b[$i]
+!   end
+end
+! end
+!
+! vec(2)
+! vec(3)
+----
+
+.Meta code
+[source, lua]
+----
+ local function vec(n)
+ Z[[-- generated add
+]]  Z[[function vec]]  Z( n )  Z[[_t.add(r,a,b)
+]]    for i=1,n do
+ Z[[  r[]]  Z(i)  Z[[] = a[]]  Z(i)  Z[[] + b[]]  Z(i)  Z[[]
+]]    end
+ Z[[end
+]]  end
+
+ vec(2)
+ vec(3)
+----
+
+.Output
+[source, lua]
+----
+-- generated add
+function vec2_t.add(r,a,b)
+  r[1] = a[1] + b[1]
+  r[2] = a[2] + b[2]
+end
+-- generated add
+function vec3_t.add(r,a,b)
+  r[1] = a[1] + b[1]
+  r[2] = a[2] + b[2]
+  r[3] = a[3] + b[3]
+end
+----
+
+====
